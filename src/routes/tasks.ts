@@ -1,9 +1,13 @@
 import { Router, Request, Response } from "express";
-import { isObjectIdOrHexString } from "mongoose";
+import { isObjectIdOrHexString, Types } from "mongoose";
 import { z } from "zod";
 import { Task } from "../models/Tasks";
+import { requireGuest } from "../middleware/requireGuest";
 
 const router = Router();
+
+// Every task route requires a valid guest user
+router.use(requireGuest);
 
 const createSchema = z.object({
   task: z.string().trim().min(1, "task cannot be empty").max(500),
@@ -24,11 +28,11 @@ const boolParam = z
 
 const listQuerySchema = z.object({
   task_type: z.enum(["all", "active", "completed"]).default("all"),
-  isCompleted: boolParam,
   isImportant: boolParam,
 });
 
 type TYPE_GET_TASK_FILTER = {
+  userId: Types.ObjectId;
   isCompleted?: boolean;
   isImportant?: boolean;
 };
@@ -43,85 +47,79 @@ const validId = (req: Request, res: Response): string | null => {
 };
 
 // POST "/"
-// @desc Create a task
+// @desc Create a task for the current guest
 router.post("/", async (req: Request, res: Response) => {
-  const parsed = createSchema?.safeParse(req?.body);
+  const parsed = createSchema.safeParse(req.body);
 
   if (!parsed.success) {
-    return res.status(400).json({
-      error: "Validation failed",
-      details: z.flattenError(parsed?.error),
-    });
-  }
-
-  const task = await Task.create(parsed?.data);
-  res.status(201).json(task);
-});
-
-// GET "/"
-// @desc List all tasks
-router.get("/", async (req: Request, res: Response) => {
-  const parsed = listQuerySchema.safeParse(req?.query);
-
-  if (!parsed?.success) {
     return res.status(400).json({
       error: "Validation failed",
       details: z.flattenError(parsed.error),
     });
   }
 
-  const { task_type, isImportant } = parsed?.data;
+  const task = await Task.create({ ...parsed.data, userId: req.userId });
+  res.status(201).json(task);
+});
 
-  const filter: TYPE_GET_TASK_FILTER = {};
+// GET "/"
+// @desc List the current guest's tasks
+router.get("/", async (req: Request, res: Response) => {
+  const parsed = listQuerySchema.safeParse(req.query);
+
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: "Validation failed",
+      details: z.flattenError(parsed.error),
+    });
+  }
+
+  const { task_type, isImportant } = parsed.data;
+
+  const filter: TYPE_GET_TASK_FILTER = { userId: req.userId };
 
   if (task_type === "active") filter.isCompleted = false;
   if (task_type === "completed") filter.isCompleted = true;
-  if (isImportant) filter.isImportant = isImportant;
+  if (isImportant !== undefined) filter.isImportant = isImportant;
 
   const tasks = await Task.find(filter).sort({ createdDate: -1 });
   res.json(tasks);
 });
 
-// Get by id
-// @desc Get task by id
+// GET "/:id"
+// @desc Get one of the current guest's tasks
 router.get("/:id", async (req: Request, res: Response) => {
   const id = validId(req, res);
   if (!id) return;
 
-  const task = await Task.findById(id);
+  const task = await Task.findOne({ _id: id, userId: req.userId });
   if (!task) return res.status(404).json({ error: "Task not found" });
   res.json(task);
 });
 
-// Update by id
-// @desc Get task by id
+// PATCH/PUT "/:id"
+// @desc Update one of the current guest's tasks
 const updateHandler = async (req: Request, res: Response) => {
   const id = validId(req, res);
   if (!id) return;
 
-  const parsed = updateSchema?.safeParse(req?.body);
-  if (!parsed?.success) {
-    return res.status(400)?.json({
+  const parsed = updateSchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({
       error: "Validation failed",
-      details: z.flattenError(parsed?.error),
+      details: z.flattenError(parsed.error),
     });
   }
 
-  const task = await Task?.findById(id);
-  if (!task) return res?.status(404)?.json({ error: "Task not found" });
+  const task = await Task.findOne({ _id: id, userId: req.userId });
+  if (!task) return res.status(404).json({ error: "Task not found" });
 
   // Flag as edited only when the task text actually changes
-  if (parsed?.data?.task !== undefined && parsed?.data?.task !== task?.task) {
+  if (parsed.data.task !== undefined && parsed.data.task !== task.task) {
     task.isEdited = true;
   }
 
-  // if task is completed
-  if (parsed?.data?.isCompleted) task.isCompleted = true;
-
-  // if task is important
-  if (parsed?.data?.isImportant) task.isImportant = true;
-
-  task?.set(parsed?.data);
+  task.set(parsed.data);
   await task.save();
 
   res.json(task);
@@ -129,13 +127,13 @@ const updateHandler = async (req: Request, res: Response) => {
 router.patch("/:id", updateHandler);
 router.put("/:id", updateHandler);
 
-// DELETE by id
-// @desc delete task by id
+// DELETE "/:id"
+// @desc Delete one of the current guest's tasks
 router.delete("/:id", async (req: Request, res: Response) => {
   const id = validId(req, res);
   if (!id) return;
 
-  const task = await Task.findByIdAndDelete(id);
+  const task = await Task.findOneAndDelete({ _id: id, userId: req.userId });
   if (!task) return res.status(404).json({ error: "Task not found" });
   res.status(204).send();
 });
