@@ -29,6 +29,8 @@ const boolParam = z
 const listQuerySchema = z.object({
   task_type: z.enum(["all", "active", "completed"]).default("all"),
   isImportant: boolParam,
+  page: z.coerce.number().int().min(1).default(1),
+  limit: z.coerce.number().int().min(1).max(50).default(2),
 });
 
 type TYPE_GET_TASK_FILTER = {
@@ -74,16 +76,31 @@ router.get("/", async (req: Request, res: Response) => {
     });
   }
 
-  const { task_type, isImportant } = parsed.data;
+  const { task_type, isImportant, page, limit } = parsed.data;
 
   const filter: TYPE_GET_TASK_FILTER = { userId: req.userId };
 
-  if (task_type === "active") filter.isCompleted = false;
-  if (task_type === "completed") filter.isCompleted = true;
-  if (isImportant !== undefined) filter.isImportant = isImportant;
+  const [tasks, total] = await Promise.all([
+    Task.find(filter)
+      .sort({ createdDate: -1, _id: -1 }) // _id keeps the order stable when dates tie
+      .skip((page - 1) * limit)
+      .limit(limit),
+    Task.countDocuments(filter),
+  ]);
 
-  const tasks = await Task.find(filter).sort({ createdDate: -1 });
-  res.json(tasks);
+  const totalPages = Math.ceil(total / limit);
+
+  res.json({
+    data: tasks,
+    pagination: {
+      page,
+      limit,
+      total,
+      totalPages,
+      hasNextPage: page < totalPages,
+      hasPrevPage: page > 1,
+    },
+  });
 });
 
 // GET "/:id"
