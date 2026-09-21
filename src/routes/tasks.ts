@@ -80,6 +80,10 @@ router.get("/", async (req: Request, res: Response) => {
 
   const filter: TYPE_GET_TASK_FILTER = { userId: req.userId };
 
+  if (task_type === "active") filter.isCompleted = false;
+  if (task_type === "completed") filter.isCompleted = true;
+  if (isImportant !== undefined) filter.isImportant = isImportant;
+
   const [tasks, total] = await Promise.all([
     Task.find(filter)
       .sort({ createdDate: -1, _id: -1 }) // _id keeps the order stable when dates tie
