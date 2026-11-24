@@ -7,6 +7,7 @@ export interface ITask {
   isImportant: boolean;
   isCompleted: boolean;
   isEdited: boolean;
+  isPinned: boolean;
 }
 
 const taskSchema = new Schema<ITask>(
@@ -17,6 +18,7 @@ const taskSchema = new Schema<ITask>(
     isImportant: { type: Boolean, default: false },
     isCompleted: { type: Boolean, default: false },
     isEdited: { type: Boolean, default: false },
+    isPinned: { type: Boolean, default: false },
   },
   {
     versionKey: false,

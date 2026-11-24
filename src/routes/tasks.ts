@@ -13,6 +13,7 @@ const createSchema = z.object({
   task: z.string().trim().min(1, "task cannot be empty").max(500),
   isImportant: z.boolean().optional(),
   isCompleted: z.boolean().optional(),
+  isPinned: z.boolean().optional(),
 });
 
 const updateSchema = createSchema
@@ -94,8 +95,12 @@ router.get("/", async (req: Request, res: Response) => {
 
   const totalPages = Math.ceil(total / limit);
 
+  // pinned task
+  const pinnedTask = tasks?.find((task) => task?.isPinned);
+  const unPinnedTasks = tasks?.filter((task) => !task?.isPinned);
+
   res.json({
-    data: tasks,
+    data: pinnedTask ? [pinnedTask, ...unPinnedTasks] : tasks,
     pagination: {
       page,
       limit,
@@ -138,6 +143,19 @@ const updateHandler = async (req: Request, res: Response) => {
   // Flag as edited only when the task text actually changes
   if (parsed.data.task !== undefined && parsed.data.task !== task.task) {
     task.isEdited = true;
+  }
+
+  // Pinned task
+  if (parsed.data.isPinned && parsed.data.task === task.task) {
+    task.isPinned = true;
+  }
+
+  // Only one pinned task per guest: unpin every other task of this guest
+  if (parsed.data.isPinned === true) {
+    await Task.updateMany(
+      { userId: req.userId, _id: { $ne: task._id }, isPinned: true },
+      { $set: { isPinned: false } },
+    );
   }
 
   task.set(parsed.data);
